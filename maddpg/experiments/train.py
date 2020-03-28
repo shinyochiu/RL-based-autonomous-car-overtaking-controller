@@ -16,12 +16,12 @@ def parse_args():
     # Environment
     parser.add_argument("--scenario", type=str, default="overtaking", help="name of the scenario script")
     parser.add_argument("--max-episode-len", type=int, default=250, help="maximum episode length")
-    parser.add_argument("--num-episodes", type=int, default=60000, help="number of episodes")
+    parser.add_argument("--num-episodes", type=int, default=100000, help="number of episodes")
     parser.add_argument("--num-adversaries", type=int, default=0, help="number of adversaries")
     parser.add_argument("--good-policy", type=str, default="dqn", help="policy for good agents")
     parser.add_argument("--adv-policy", type=str, default="maddpg", help="policy of adversaries")
     # Core training parameters
-    parser.add_argument("--lr", type=float, default=1e-3, help="learning rate for Adam optimizer")
+    parser.add_argument("--lr", type=float, default=1e-2, help="learning rate for Adam optimizer")
     parser.add_argument("--gamma", type=float, default=0.95, help="discount factor")
     parser.add_argument("--batch-size", type=int, default=1024, help="number of episodes to optimize at the same time")
     parser.add_argument("--num-units", type=int, default=64, help="number of units in the mlp")
@@ -29,7 +29,7 @@ def parse_args():
     parser.add_argument("--trajectory_size", type=int, default=25)
     # Checkpointing
     parser.add_argument("--exp-name", type=str, default='Test', help="name of the experiment")
-    parser.add_argument("--save-dir", type=str, default="C:/Users/xinyouqiu/Desktop/北京清華/科研/開題/仿真環境/maddpg/policy/model_dqn.ckpt", help="directory in which training state and model should be saved")
+    parser.add_argument("--save-dir", type=str, default="/home/shinyochiu/maddpg/policy/model_dqn.ckpt", help="directory in which training state and model should be saved")
     parser.add_argument("--save-rate", type=int, default=1000, help="save model once every time this many episodes are completed")
     parser.add_argument("--load-dir", type=str, default="", help="directory in which training state and model are loaded")
     # Evaluation
@@ -37,8 +37,8 @@ def parse_args():
     parser.add_argument("--display", action="store_true", default=True)
     parser.add_argument("--benchmark", action="store_true", default=False)
     parser.add_argument("--benchmark-iters", type=int, default=100000, help="number of iterations run for benchmarking")
-    parser.add_argument("--benchmark-dir", type=str, default="C:/Users/xinyouqiu/Desktop/北京清華/科研/開題/仿真環境/maddpg/trainResult/", help="directory where benchmark data is saved")
-    parser.add_argument("--plots-dir", type=str, default="C:/Users/xinyouqiu/Desktop/北京清華/科研/開題/仿真環境/maddpg/trainResult/", help="directory where plot data is saved")
+    parser.add_argument("--benchmark-dir", type=str, default="/home/shinyochiu/maddpg/trainResult/", help="directory where benchmark data is saved")
+    parser.add_argument("--plots-dir", type=str, default="/home/shinyochiu/maddpg/trainResult/", help="directory where plot data is saved")
     return parser.parse_args()
 
 def mlp_model(input, num_outputs, scope, reuse=False, num_units=64, rnn_cell=None):
@@ -88,9 +88,9 @@ def make_env(scenario_name, arglist, benchmark=False):
     world = scenario.make_world()
     # create multiagent environment
     if benchmark:
-        env = MultiAgentEnv(world, scenario.reset_world, scenario.reward, scenario.observation, scenario.constraint, scenario.benchmark_data)
+        env = MultiAgentEnv(world, scenario.reset_world, scenario.reward, scenario.observation, scenario.benchmark_data)
     else:
-        env = MultiAgentEnv(world, scenario.reset_world, scenario.reward, scenario.observation, scenario.constraint, done_callback=scenario.done)
+        env = MultiAgentEnv(world, scenario.reset_world, scenario.reward, scenario.observation, done_callback=scenario.done)
     return env
 
 def get_trainers(env, num_adversaries, his_shape_n, obs_shape_n, arglist):
@@ -99,7 +99,8 @@ def get_trainers(env, num_adversaries, his_shape_n, obs_shape_n, arglist):
         model = mlp_model
         if arglist.good_policy=="ddpg":
             trainer = DDPGAgentTrainer
-            trainers.append(trainer(model, obs_shape_n, [env.action_space[0]], env.n, arglist))
+            trainers.append(trainer(model, obs_shape_n, [env.action_space[0]], env.n, arglist,
+                                    local_q_func=(arglist.adv_policy == 'ddpg')))
         elif arglist.good_policy=="dqn":
             trainer = DQNAgentTrainer
             trainers.append(trainer(model, obs_shape_n, [env.action_space[0]], env.n, arglist,
@@ -137,11 +138,9 @@ def train(arglist):
         if arglist.good_policy == "ddpg":
             # only one agent's observation is considered in ddpg
             obs_shape_n = [env.observation_space[0].shape]
-            his_shape_n = [((env.observation_space[0].shape[0] + 3) * arglist.trajectory_size,)]
         else:
             obs_shape_n = [env.observation_space[i].shape for i in range(env.n)]
             his_shape_n = [((env.observation_space[i].shape[0]+3)*arglist.trajectory_size,) for i in range(env.n)]
-        con_shape_n = [env.constraint_space[0].shape] #2020/02/20
         num_adversaries = min(env.n, arglist.num_adversaries)
         episode_step = [0]
         final_ep_steps = []
@@ -170,10 +169,10 @@ def train(arglist):
         agent_info = [[[]]]  # placeholder for benchmarking info
         saver = tf.train.Saver()
 
-        obs_n = env.reset()
-        '''def his_padding(his):
+        def his_padding(his):
             his = np.concatenate((his, np.zeros(475-len(his))))
             return his
+        obs_n = env.reset()
         action_pre = [np.array(np.random.uniform(0,1,3))] * env.n # an initial action value for episode step = 0
         his_pre = [] * env.n
         for i in range(env.n):
@@ -182,7 +181,7 @@ def train(arglist):
         his_n_c = [] * env.n
         for i in range(env.n):
             his_n_a.append(his_pre[i])
-            his_n_c.append(his_pre[i])'''
+            his_n_c.append(his_pre[i])
         t_start = time.time()
         final_reward_prev = None
         print('Starting iterations...')
@@ -194,7 +193,7 @@ def train(arglist):
                 if arglist.good_policy == "maddpg":
                     action_n = [agent.action(obs) for agent, obs in zip(trainers, obs_n)]
                 else:
-                    action_n = [trainers[0].action(obs_n[obs],train_step) for obs in range(len(obs_n))]
+                    action_n = [trainers[0].action(obs_n[obs], len(episode_rewards)) for obs in range(len(obs_n))]
                 #print(action_n)
                 # environment step
                 new_obs_n, rew_n, done_n, info_n, crash_n = env.step(action_n)
@@ -203,7 +202,7 @@ def train(arglist):
                 terminal = (episode_step[-1] >= arglist.max_episode_len)
                 # collect experience
                 if arglist.good_policy == "ddpg":
-                    for i in range(len(obs_n)):
+                    for i in enumerate(obs_n):
                         trainers[0].experience(obs_n[i], action_n[i], rew_n[i], new_obs_n[i], done_n[i], terminal)
                 else:
                     for i, agent in enumerate(trainers):
@@ -359,7 +358,7 @@ def train(arglist):
 
 if __name__ == '__main__':
     arglist = parse_args()
-    #train(arglist)
+    train(arglist)
     '''graph = tf.get_default_graph()
     sess = tf.Session()
     saver = tf.train.import_meta_graph("/home/shinyochiu/maddpg/policy/model.ckpt.meta")
@@ -368,41 +367,23 @@ if __name__ == '__main__':
     converter = tf.lite.TFLiteConverter.from_saved_model("/home/shinyochiu/maddpg/policy/graph.pb")
     tflite_model = converter.convert()
     open("converted_model.tflite", "wb").write(tflite_model)'''
-    import pprint, pickle
+    '''import pprint, pickle
     import matplotlib.pyplot as plt
     rew_file_name = arglist.plots_dir + arglist.exp_name + '_rewards_2.pkl'
     pkl_file1 = open(rew_file_name, 'rb')
-    rewdqn_file_name = arglist.plots_dir + arglist.exp_name + '_rewards_dqn.pkl'
-    pkl_file2 = open(rewdqn_file_name, 'rb')
-    crash_file_name = arglist.plots_dir + arglist.exp_name + '_crashes_2.pkl'
-    pkl_file3 = open(crash_file_name, 'rb')
-    crashdqn_file_name = arglist.plots_dir + arglist.exp_name + '_crashes_dqn.pkl'
-    pkl_file4 = open(crashdqn_file_name, 'rb')
-    step_file_name = arglist.plots_dir + arglist.exp_name + '_steps_formation.pkl'
-    pkl_file5 = open(step_file_name, 'rb')
-    stepdqn_file_name = arglist.plots_dir + arglist.exp_name + '_steps_dqn.pkl'
-    pkl_file6 = open(stepdqn_file_name, 'rb')
-    rew = pickle.load(pkl_file1)
-    rew_dqn = pickle.load(pkl_file2)
-    crash = pickle.load(pkl_file3)
-    crash_dqn = pickle.load(pkl_file4)
-    steps = pickle.load(pkl_file5)
-    steps_dqn = pickle.load(pkl_file6)
-    pprint.pprint(min(crash))
-    pprint.pprint(min(crash_dqn))
-    pprint.pprint(steps[crash.index(min(crash))])
-    pprint.pprint(steps_dqn[crash_dqn.index(min(crash_dqn))])
-
-    x=list(range(1,len(steps)+1))
-    plt.plot(rew[0:len(steps)], label='DDPG')
-    plt.plot(rew_dqn[0:len(steps)], label='DQN')
-    #plt.bar(x, crash_dqn[0:len(steps)], label='DQN', align="center", color='lightsteelblue')
-    #plt.bar(x, crash[0:len(steps)], label='DDPG', align="edge")
+    agrew_file_name = arglist.plots_dir + arglist.exp_name + '_rewards_dqn.pkl'
+    pkl_file2 = open(agrew_file_name, 'rb')
+    crash = pickle.load(pkl_file1)
+    crash_dqn = pickle.load(pkl_file2)
+    #pprint.pprint(crash[steps.index(min(steps))])
+    x=list(range(1,len(crash)+1))
+    plt.plot(crash, label='DDPG')
+    plt.plot(crash_dqn, label='DQN')
+    #plt.bar(x, crash_dqn, label='DQN', align="center", color='lightsteelblue')
+    #plt.bar(x, crash, label='DDPG', align="edge")
     plt.xlabel('number of training episodes (x1000)')
     plt.ylabel('mean episode rewards')
     plt.legend()
     plt.show()
     pkl_file1.close()
-    pkl_file2.close()
-    pkl_file3.close()
-    pkl_file4.close()
+    pkl_file2.close()'''

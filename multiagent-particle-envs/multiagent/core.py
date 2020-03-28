@@ -195,7 +195,7 @@ class World(object):
             if (p_force[i] is not None):
                 #entity.state.p_vel += (p_force[i] / entity.mass) * self.dt
                 # 20190717 modify the control of agents
-                entity.state.p_omg = np.pi*p_force[i][0] / (16*entity.mass)
+                entity.state.p_omg = np.pi*p_force[i][0] / (48*entity.mass)#(16*entity.mass)
                 entity.state.p_vel[0] += (p_force[i][1] * np.cos(entity.state.p_ang) / entity.mass) * self.dt
                 entity.state.p_vel[1] += (p_force[i][1] * np.sin(entity.state.p_ang) / entity.mass) * self.dt
                 #print(entity.state.p_vel[0])

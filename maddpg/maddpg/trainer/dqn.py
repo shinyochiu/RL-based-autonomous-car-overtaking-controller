@@ -114,7 +114,7 @@ class DQNAgentTrainer(AgentTrainer):
 
     def action(self, obs, episode):
         #print(0.6+np.random.rand()*episode/25000)
-        if episode < 30000:
+        if episode < 50000:
             epsilon = np.random.rand()
         else:
             epsilon = 1

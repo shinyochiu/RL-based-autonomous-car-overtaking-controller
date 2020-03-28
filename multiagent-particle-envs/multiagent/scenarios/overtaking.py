@@ -69,6 +69,7 @@ class Scenario(BaseScenario):
         elif path_type == 'line':
             xs = np.array([start[0], 4])
             ys = np.array([start[1], start[1]])
+
             xys = list(zip(xs, ys))
         return xys
 
@@ -263,32 +264,36 @@ class Scenario(BaseScenario):
                     rew -= 5'''
         static_obs = self.get_static_obstacles(world)
         dynamic_obs = self.get_dynamic_obstacles(world)
-        obs = static_obs + dynamic_obs
         if agent.collide:
             # compute the reward due to how close the agent to current goal
-            vel = np.linalg.norm(agent.state.p_vel)
             rew -= 100*(agent.dis2goal-agent.dis2goal_prev) #* np.abs(agent.state.p_ang - agent.ang2goal)
             # compute the reward due to distance and angle to obstacles
             dis2obs = [safe_dis] * 5
             ang2obs = [0] * 1
-            for o in obs:
+
+            for o in static_obs:
                 if self.is_collision(agent, o):
                     rew -= 5
-                dis = np.linalg.norm(agent.state.p_pos - o.state.p_pos) - (agent.size + o.size)
-                #ang2obs[ang2obs.index(max(ang2obs))] = np.arccos(np.clip(np.dot((o.state.p_pos - agent.state.p_pos), agent.state.p_vel)/(np.linalg.norm(agent.state.p_vel)*dis), -1, 1))
-                if 'dynamic_obs 0' in o.name:
-                    dis2leader = dis
-                    ang2leader = np.arccos(
-                        np.clip(np.dot((o.state.p_pos - agent.state.p_pos), agent.state.p_vel) / (vel * dis), -1, 1))
-                    if abs(ang2leader) < np.pi/6:
-                        rew -= alpha*np.exp(-beta*dis2leader)
-                    elif abs(ang2leader) < 2*np.pi/3:
-                        rew -= alpha*np.exp(-beta/(np.abs(0.66-dis2leader*np.sin(ang2leader))+1e-6))
-                    '''else:
-                        rew -= min(5.0, alpha*np.exp(beta*(abs(agent.ang2goal - agent.state.p_ang)+1e-6)/vel))'''
-                else:
-                    dis2obs[dis2obs.index(max(dis2obs))] = dis
+                dis2obs[dis2obs.index(max(dis2obs))] = np.linalg.norm(agent.state.p_pos - o.state.p_pos) - (agent.size + o.size)
+                ang2obs[ang2obs.index(max(ang2obs))] = np.arccos(np.clip(np.dot((o.state.p_pos - agent.state.p_pos), agent.state.p_vel)/(np.linalg.norm(agent.state.p_vel)*np.linalg.norm(o.state.p_pos - agent.state.p_pos)), -1, 1))
+
             rew -= alpha*np.exp(-beta*min(dis2obs))
+
+            dis2leader = [safe_dis] * 5
+            ang2leader = [0] * 1
+            for o in dynamic_obs:
+                if self.is_collision(agent, o):
+                    rew -= 5
+                dis2leader[dis2leader.index(max(dis2leader))] = np.linalg.norm(agent.state.p_pos - o.state.p_pos) - (agent.size + o.size)
+                ang2leader[ang2leader.index(max(ang2leader))] = np.arccos(np.clip(np.dot((o.state.p_pos - agent.state.p_pos), agent.state.p_vel)/(np.linalg.norm(agent.state.p_vel)*np.linalg.norm(o.state.p_pos - agent.state.p_pos)), -1, 1))
+                if 'dynamic_obs 0' in o.name:
+                    if abs(min(ang2leader)) < np.pi/6:
+                        rew -= alpha*np.exp(-beta * (min(dis2leader)))
+                    elif abs(min(ang2leader)) < np.pi/2:
+                        rew -= alpha*np.exp(-beta / (abs(0.66-min(dis2leader)*np.sin(min(ang2leader)))))
+                    else:
+                        rew -= alpha*np.exp(-beta / (abs(np.sin(agent.ang2goal - agent.state.p_ang))+1e-6))
+
 
         '''if agent.dis2goal < 1e-1:
             rew += 1000'''
@@ -307,6 +312,24 @@ class Scenario(BaseScenario):
         for p in range(world.dim_p):
             x = abs(agent.state.p_pos[p])
             rew -= alpha * bound(x)
+        # compute the reward due to formation shape
+        '''agent_idx = int(agent.name[-1])
+        if agent_idx > 0:
+            if agent_idx > 0 and agent_idx < len(agents)-1:
+                dis2neighbor1 = np.linalg.norm(agents[agent_idx].state.p_pos - agents[agent_idx + 1].state.p_pos)
+                dis2neighbor2 = np.linalg.norm(agents[agent_idx].state.p_pos - agents[agent_idx - 1].state.p_pos)
+            elif agent_idx == 0:
+                dis2neighbor1 = np.linalg.norm(agents[agent_idx].state.p_pos - agents[agent_idx + 1].state.p_pos)
+                dis2neighbor2 = np.linalg.norm(agents[agent_idx].state.p_pos - agents[-1].state.p_pos)
+            elif agent_idx == len(agents)-1:
+                dis2neighbor1 = np.linalg.norm(agents[agent_idx].state.p_pos - agents[0].state.p_pos)
+                dis2neighbor2 = np.linalg.norm(agents[agent_idx].state.p_pos - agents[agent_idx - 1].state.p_pos)
+            #print(np.abs(dis2neighbor1 - 0.1))
+            if np.abs(dis2neighbor1 - 0.1) > 1e-2:
+                rew -= dis2neighbor1/2
+            if np.abs(dis2neighbor2 - 0.1) > 1e-2:
+                rew -= dis2neighbor2/2'''
+
 
         #print(rew)
 
@@ -403,6 +426,7 @@ class Scenario(BaseScenario):
             return np.concatenate(dis2goal + ang_err + vel + omg + other_dis + other_ang + entity_dis + entity_ang)
         else:
             #print(np.concatenate(dis2goal + ang_err + vel + omg + entity_dis + entity_ang))
+            print(entity_dis[4])
             return np.concatenate(dis2goal + ang_err + vel + omg + entity_dis + entity_ang)
 
         # todo
@@ -421,7 +445,7 @@ class Scenario(BaseScenario):
         else:
             vect_offset = 6 * np.linalg.norm(
                 world.dynamic_obs[0].state.p_vel)
-        if dis < 2e-2:
+        if dis < 4e-1:
             #return True
             if world.station == world.station_num:
                 return True
@@ -431,6 +455,6 @@ class Scenario(BaseScenario):
         else:
             if world.station < world.station_num:
                 world.goal = world.dynamic_obs[0].state.p_pos + np.array([vect_offset, 1]) * world.goal_vect
-        return any(abs(world.goal) > 5)
+        return False
 
 
